@@ -1,0 +1,50 @@
+Shearing box energy source term :
+- added in source_term
+- predictor step added in ctoprim
+
+Upwind solver for the azimuthal advection :
+- energy terms have been modified (in umuscl.f90, subroutine : cmpflxm)
+
+Viscosity :
+- added an additional term in momentum flux due to background keplerian shear
+- added additional terms in energy flux due to background keplerian shear
+- added volumic source terms for the energy 
+
+Resistivity :
+- update of the energy added (fluxes were already implemented)
+
+
+Thermal diffusion :
+- written subroutine thermal_diffusion in thermal_diffusion.f90 : computes energy flux and updates energy
+- added declaration of kappa (=thermal diffusivity) in variables.f90 where nu and eta are declared
+- initialise kappa in init.f90 in the same way as eta and nu (subroutines : read_input and default_params) 
+- subroutine get_kappa written in user_init.f90 : gives the value of kappa for a given value of rho and P (so far kappa is constant though..)
+- subroutine get_P written in user_init.f90 : computes the pressure given energy, momentum and magnetic field.
+- added a condition .or.(kappa>0.d0) for the call to subroutine dissip (so that it is called if kappa>0 even if nu=eta=0)
+
+Subroutine dissip :
+- added flux=0 before resistivity
+- added a call to thermal_diffusion
+
+CFL condition : 
+time step constraints from thermal diffusion, viscosity and resistivity have been added in the subroutine compute_dt.
+NB : I am not quite sure of what is the rigorous constraint : I used dt < 0.5 dx^2/kappa which is supposed to be the constraint for a diffusion equation solved with a second order finite difference method. However by doing tests I found that with thermal diffusion this timestep needs to be decreased by another factor around 4 for the code to be stable..
+
+
+Cooling function :
+- new subroutine get_cool written in user_init.f90
+- cooling step added in source_term
+
+Boundary conditions :
+boundana_extrap_T.f90 contains vertical boundary conditions where the temperature is linearly extrapolated. However this does not work well : it is less stable than using a zerogradient condition on the temperature, and the code tends to crash after some time for a polytropic atmosphere.
+
+Subroutine user_init.f90 :
+a switch has been added to allow for a non-stratified shearing box : when stratif is 'false' then the vertical gravity is switched off.
+
+
+Initial conditions :
+- condinit_mag.f90 is the old initial condition with an isothermal disc and different kinds of magnetic field configuration and perturbations.
+- condinit_polytrop.f90 contains the initial conditions for a polytropic atmosphere. Linear waves (r-modes) can be added by reading from a file.
+- condinit_heatcool.f90 contains the initial conditions for a static equilibrium including viscous heating, thermal diffusion and cooling (bug somewhere : for now the code does not keep the initial state as it should..)
+- condinit_epientropy.f90 : contains the initial conditions for an entropy wave or an oscillation of vertical magnetic field with no total pressure perturbations (radial or azimuthal wavenumber, unstratified shearing box). Epicyclic oscillations can be added as well.
+

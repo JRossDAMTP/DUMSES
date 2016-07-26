@@ -1,0 +1,416 @@
+! uin = (\rho, \rho vx, \rho vy, \rho vz, Etot, bx, by, bz)
+subroutine viscosity(uin,flux,dx,dy,dz,dt,nu)
+  use stratified
+  use hydro_parameters
+  use const
+  implicit none
+  real(dp)::dx,dy,dz,dt,nu,rho1,rhovx,rhovy,rhovz,Bx,By,Bz,E
+  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar+3)::uin 
+  real(dp),dimension(1:nvector,if1:if2,jf1:jf2,kf1:kf2,1:nvar,1:ndim)::flux
+!-----------------------------------------------------------------------
+  integer :: i,j,k,i0,j0,k0,idim
+  real(dp), dimension(3) :: dudx,dudy,dudz
+  real(dp) :: rho,u,v,w,uR,uL,uRR,uRL,uLR,uLL
+  real(dp) :: txx,tyy,tzz,txy,txz,tyz
+  !--special case for mass diffusion equation--
+  real(dp) :: D,Dmax=1.e-5,cDyn=5.,drdx,drdy,drdz
+!\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\///////////////////////////////////
+!=========================================================
+!
+  if (verbose) write (*,*) 'Entering viscosity...'
+
+  do k=kf1,kf2
+     do j=jf1,jf2
+        do i=if1,if2
+	   
+   	   !Allow for a varying viscosity
+	 
+	   rho1=uin(1,i,j,k,1)
+           rhovx=uin(1,i,j,k,2) ; Bx=uin(1,i,j,k,6)
+           rhovy=uin(1,i,j,k,3) ; By=uin(1,i,j,k,7)
+           rhovz=uin(1,i,j,k,4) ; Bz=uin(1,i,j,k,8)
+	   E=uin(1,i,j,k,5)
+	   CALL get_nu(nu,rho1,rhovx,rhovy,rhovz,E,Bx,By,Bz,gamma)
+
+	   
+
+           !1st direction viscous flux
+           rho=half*(uin(1,i,j,k,1)+uin(1,i-1,j,k,1))
+#if ISO==0
+           u  =half*(uin(1,i,j,k,2)/uin(1,i,j,k,1)+uin(1,i-1,j,k,2)/uin(1,i-1,j,k,1))
+           v  =half*(uin(1,i,j,k,3)/uin(1,i,j,k,1)+uin(1,i-1,j,k,3)/uin(1,i-1,j,k,1))
+           w  =half*(uin(1,i,j,k,4)/uin(1,i,j,k,1)+uin(1,i-1,j,k,4)/uin(1,i-1,j,k,1))
+#endif
+           do idim=1,3
+              uR=uin(1,i  ,j,k,idim+1)/uin(1,i  ,j,k,1)
+              uL=uin(1,i-1,j,k,idim+1)/uin(1,i-1,j,k,1)
+              dudx(idim)=(uR-uL)/dx
+           end do
+#if NDIM>1
+           do idim=1,2
+              uRR=uin(1,i  ,j+1,k,idim+1)/uin(1,i  ,j+1,k,1)
+              uRL=uin(1,i-1,j+1,k,idim+1)/uin(1,i-1,j+1,k,1)
+              uLR=uin(1,i  ,j-1,k,idim+1)/uin(1,i  ,j-1,k,1)
+              uLL=uin(1,i-1,j-1,k,idim+1)/uin(1,i-1,j-1,k,1)
+              uR=uRR+uRL ; uL=uLR+uLL
+              dudy(idim)=forth*(uR-uL)/dy
+           end do
+#else
+           dudy=0.d0
+#endif
+#if NDIM==3
+           do idim=1,3,2
+              uRR=uin(1,i  ,j,k+1,idim+1)/uin(1,i  ,j,k+1,1)
+              uRL=uin(1,i-1,j,k+1,idim+1)/uin(1,i-1,j,k+1,1)
+              uLR=uin(1,i  ,j,k-1,idim+1)/uin(1,i  ,j,k-1,1)
+              uLL=uin(1,i-1,j,k-1,idim+1)/uin(1,i-1,j,k-1,1)
+              uR=uRR+uRL ; uL=uLR+uLL
+              dudz(idim)=forth*(uR-uL)/dz
+           end do
+#else
+           dudz=0.d0
+#endif
+           txx=-two3rd*nu*rho*(two*dudx(1)-dudy(2)-dudz(3))
+           txy=-       nu*rho*(dudy(1)+dudx(2))
+           txz=-       nu*rho*(dudz(1)+dudx(3))
+           flux(1,i,j,k,2,1)=txx*dt/dx
+           flux(1,i,j,k,3,1)=txy*dt/dx
+           IF (Omega0>0.d0) THEN
+              ! term coming from the viscosity acting on background Keplerian shear :
+              flux(1,i,j,k,3,1)=flux(1,i,j,k,3,1) + nu*rho*1.5d0*Omega0*dt/dx
+           END IF
+           flux(1,i,j,k,4,1)=txz*dt/dx
+#if ISO==0
+           flux(1,i,j,k,5,1)=u*txx+v*txy+w*txz
+           IF (Omega0>0.d0) THEN
+              ! term coming from the viscosity acting on background Keplerian shear :
+              flux(1,i,j,k,5,1)=flux(1,i,j,k,5,1) + nu*rho*1.5d0*Omega0*v
+           END IF
+           flux(1,i,j,k,5,1)=flux(1,i,j,k,5,1)*dt/dx
+#endif
+
+           !--special case for mass diffusion equation--
+           if (massDiff) then
+              D=sqrt(sqrt(1.+(10.d0**cDyn*rho)**4)) ; D=Dmax/D
+              drdx=(uin(1,i,j,k,1)-uin(1,i-1,j,k,1))/dx
+              flux(1,i,j,k,1,1)=-D*drdx*dt/dx
+           endif
+
+           !2nd direction viscous flux
+#if NDIM > 1
+           rho=half*(uin(1,i,j,k,1)+uin(1,i,j-1,k,1))
+#if ISO==0
+           u  =half*(uin(1,i,j,k,2)/uin(1,i,j,k,1)+uin(1,i,j-1,k,2)/uin(1,i,j-1,k,1))
+           v  =half*(uin(1,i,j,k,3)/uin(1,i,j,k,1)+uin(1,i,j-1,k,3)/uin(1,i,j-1,k,1))
+           w  =half*(uin(1,i,j,k,4)/uin(1,i,j,k,1)+uin(1,i,j-1,k,4)/uin(1,i,j-1,k,1))
+#endif
+           do idim=1,3
+              uR=uin(1,i,j  ,k,idim+1)/uin(1,i,j  ,k,1)
+              uL=uin(1,i,j-1,k,idim+1)/uin(1,i,j-1,k,1)
+              dudy(idim)=(uR-uL)/dy
+           end do
+           do idim=1,2
+              uRR=uin(1,i+1,j  ,k,idim+1)/uin(1,i+1,j  ,k,1)
+              uRL=uin(1,i+1,j-1,k,idim+1)/uin(1,i+1,j-1,k,1)
+              uLR=uin(1,i-1,j  ,k,idim+1)/uin(1,i-1,j  ,k,1)
+              uLL=uin(1,i-1,j-1,k,idim+1)/uin(1,i-1,j-1,k,1)
+              uR=uRR+uRL ; uL=uLR+uLL
+              dudx(idim)=forth*(uR-uL)/dx
+           end do
+#if NDIM==3
+           do idim=2,3
+              uRR=uin(1,i,j  ,k+1,idim+1)/uin(1,i,j  ,k+1,1)
+              uRL=uin(1,i,j-1,k+1,idim+1)/uin(1,i,j-1,k+1,1)
+              uLR=uin(1,i,j  ,k-1,idim+1)/uin(1,i,j  ,k-1,1)
+              uLL=uin(1,i,j-1,k-1,idim+1)/uin(1,i,j-1,k-1,1)
+              uR=uRR+uRL ; uL=uLR+uLL
+              dudz(idim)=forth*(uR-uL)/dz
+           end do
+#else
+           dudz=0.d0
+#endif
+           tyy=-two3rd*nu*rho*(two*dudy(2)-dudx(1)-dudz(3))
+           txy=-       nu*rho*(dudy(1)+dudx(2))
+           tyz=-       nu*rho*(dudz(2)+dudy(3))
+           flux(1,i,j,k,2,2)=txy*dt/dy
+           IF (Omega0>0.d0) THEN
+              ! term coming from the viscosity acting on background Keplerian shear :
+              flux(1,i,j,k,2,2)=flux(1,i,j,k,2,2) + nu*rho*1.5d0*Omega0*dt/dy
+           END IF
+           flux(1,i,j,k,3,2)=tyy*dt/dy
+           flux(1,i,j,k,4,2)=tyz*dt/dy
+#if ISO==0
+           flux(1,i,j,k,5,2)=u*txy+v*tyy+w*tyz
+           IF (Omega0>0.d0) THEN
+              ! term coming from the viscosity acting on background Keplerian shear :
+              flux(1,i,j,k,5,2)=flux(1,i,j,k,5,2) + nu*rho*1.5d0*Omega0*u
+           END IF
+           flux(1,i,j,k,5,2)=flux(1,i,j,k,5,2)*dt/dy
+#endif
+
+           !--special case for mass diffusion equation--
+           if (massDiff) then
+              D=sqrt(sqrt(1.+(10.d0**cDyn*rho)**4)) ; D=Dmax/D
+              drdy=(uin(1,i,j,k,1)-uin(1,i,j-1,k,1))/dy
+              flux(1,i,j,k,1,2)=-D*drdy*dt/dy
+           endif
+
+#endif
+
+           !3rd direction viscous flux
+#if NDIM==3
+           rho=half*(uin(1,i,j,k,1)+uin(1,i,j,k-1,1))
+#if ISO==0
+           u  =half*(uin(1,i,j,k,2)/uin(1,i,j,k,1)+uin(1,i,j,k-1,2)/uin(1,i,j,k-1,1))
+           v  =half*(uin(1,i,j,k,3)/uin(1,i,j,k,1)+uin(1,i,j,k-1,3)/uin(1,i,j,k-1,1))
+           w  =half*(uin(1,i,j,k,4)/uin(1,i,j,k,1)+uin(1,i,j,k-1,4)/uin(1,i,j,k-1,1))
+#endif
+           do idim=1,3
+              uR=uin(1,i,j,k  ,idim+1)/uin(1,i,j,k  ,1)
+              uL=uin(1,i,j,k-1,idim+1)/uin(1,i,j,k-1,1)
+              dudz(idim)=(uR-uL)/dz
+           end do
+           do idim=1,3,2
+              uRR=uin(1,i+1,j,k  ,idim+1)/uin(1,i+1,j,k  ,1)
+              uRL=uin(1,i+1,j,k-1,idim+1)/uin(1,i+1,j,k-1,1)
+              uLR=uin(1,i-1,j,k  ,idim+1)/uin(1,i-1,j,k  ,1)
+              uLL=uin(1,i-1,j,k-1,idim+1)/uin(1,i-1,j,k-1,1)
+              uR=uRR+uRL ; uL=uLR+uLL
+              dudx(idim)=forth*(uR-uL)/dx
+           end do
+           do idim=2,3
+              uRR=uin(1,i,j+1,k  ,idim+1)/uin(1,i,j+1,k  ,1)
+              uRL=uin(1,i,j+1,k-1,idim+1)/uin(1,i,j+1,k-1,1)
+              uLR=uin(1,i,j-1,k  ,idim+1)/uin(1,i,j-1,k  ,1)
+              uLL=uin(1,i,j-1,k-1,idim+1)/uin(1,i,j-1,k-1,1)
+              uR=uRR+uRL ; uL=uLR+uLL
+              dudy(idim)=forth*(uR-uL)/dy
+           end do
+           tzz=-two3rd*nu*rho*(two*dudz(3)-dudx(1)-dudy(2))
+           txz=-       nu*rho*(dudz(1)+dudx(3))
+           tyz=-       nu*rho*(dudz(2)+dudy(3))
+           flux(1,i,j,k,2,3)=txz*dt/dz
+           flux(1,i,j,k,3,3)=tyz*dt/dz
+           flux(1,i,j,k,4,3)=tzz*dt/dz
+#if ISO==0
+           flux(1,i,j,k,5,3)=u*txz+v*tyz+w*tzz
+           flux(1,i,j,k,5,3)=flux(1,i,j,k,5,3)*dt/dz
+#endif
+
+           !--special case for mass diffusion equation--
+           if (massDiff) then
+              D=sqrt(sqrt(1.+(10.d0**cDyn*rho)**4)) ; D=Dmax/D
+              drdz=(uin(1,i,j,k,1)-uin(1,i,j,k-1,1))/dz
+              flux(1,i,j,k,1,3)=-D*drdz*dt/dz
+           endif
+
+#endif
+
+        end do
+     end do
+  end do
+  !
+  ! Conservative updates for momentum and energy
+  !
+  do idim=1,ndim
+     i0=0; j0=0; k0=0 
+     if(idim==1)i0=1
+     if(idim==2)j0=1
+     if(idim==3)k0=1
+
+     do k=1,nz
+        do j=1,ny
+           do i=1,nx
+              uin(1,i,j,k,1:5)=uin(1,i,j,k,1:5)+ &
+                   & (flux(1,i   ,j   ,k   ,1:5,idim) &
+                   & -flux(1,i+i0,j+j0,k+k0,1:5,idim))
+           end do
+        end do
+     end do
+     
+  end do
+
+#if ISO==0
+  IF (Omega0>0.d0) THEN
+     IF (verbose) WRITE(*,*) 'Volumic source terms in shearing box energy equation..'
+     ! Volumic source terms in shearing box energy equation (shear*Txy) :
+     do k=1,nz
+        do j=1,ny
+           do i=1,nx
+              rho = uin(1,i,j,k,1)
+		!viscosity variation
+	      
+	      rho1=uin(1,i,j,k,1)
+              rhovx=uin(1,i,j,k,2) ; Bx=uin(1,i,j,k,6)
+              rhovy=uin(1,i,j,k,3) ; By=uin(1,i,j,k,7)
+              rhovz=uin(1,i,j,k,4) ; Bz=uin(1,i,j,k,8)
+	      E=uin(1,i,j,k,5)
+	      CALL get_nu(nu,rho1,rhovx,rhovy,rhovz,E,Bx,By,Bz,gamma)
+
+	      
+              dudy(1) = half*(uin(1,i  ,j+1,k,2)/uin(1,i  ,j+1,k,1) - uin(1,i  ,j-1,k,2)/uin(1,i  ,j-1,k,1))
+              dudx(2) = half*(uin(1,i+1,j  ,k,3)/uin(1,i+1,j  ,k,1) - uin(1,i-1,j  ,k,3)/uin(1,i-1,j  ,k,1))
+              txy = -nu*rho*(dudy(1)+dudx(2))
+              uin(1,i,j,k,5)=uin(1,i,j,k,5)+ txy*1.5d0*Omega0*dt + nu*rho*(1.5d0*Omega0)**2*dt
+
+
+           end do
+        end do
+     end do
+  END IF
+#endif
+  
+  
+!
+  return
+end subroutine viscosity
+!
+!
+! viscosity update for cylindrical coordinates (2D R-phi)
+subroutine viscosity_II(uin,dx,dy,dz,dt,nu)
+  use hydro_parameters
+  use const
+  use variables , only : x
+  implicit none
+  real(dp)::dx,dy,dz,dt,nu
+  real(dp),dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:nvar+3)::uin 
+!-----------------------------------------------------------------------
+  real(dp),dimension(:,:,:,:),allocatable::force
+  integer :: i,j,k,idim
+  real(dp) :: fx,fy
+  real(dp) :: rho,uL,uR,uc,vL,vR,vc,divv,dudx,dudy,dvdx,dvdy
+  real(dp) :: tyy,tyyL,tyyR,txxL,txxR,txyL,txyR,xL,xR,xc
+  integer :: ihi,jhi,khi
+!\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\///////////////////////////////////
+!=========================================================
+!
+  if (verbose) write (*,*) 'Entering viscosity...'
+
+  allocate(force(if1:if2,jf1:jf2,kf1:kf2,1:2))
+
+  ihi=max(1,if2-1)
+  jhi=max(1,jf2-1)
+  khi=max(1,kf2-1)
+
+  do k=1,khi
+     do j=1,jhi
+        do i=1,ihi
+
+           !Compute fx, viscous force in 1st direction
+           rho=half*(uin(1,i,j,k,1)+uin(1,i-1,j,k,1))
+           xR=x(i  ) ; uR=uin(1,i  ,j,k,2)/uin(1,i  ,j,k,1)
+           xL=x(i-1) ; uL=uin(1,i-1,j,k,2)/uin(1,i-1,j,k,1)
+           vR=half*(uin(1,i,j+1,k,3)/uin(1,i,j+1,k,1)+uin(1,i-1,j+1,k,3)/uin(1,i-1,j+1,k,1))
+           vL=half*(uin(1,i,j-1,k,3)/uin(1,i,j-1,k,1)+uin(1,i-1,j-1,k,3)/uin(1,i-1,j-1,k,1))
+           xc=half*(xR+xL)
+           dudx=(uR-uL)/dx
+           divv=(xR*uR-xL*uL)/dx+half*(vR-vL)/dy ; divv=divv/xc
+           txxL=nu*rho*(2.d0*dudx-two3rd*divv)
+
+           rho=half*(uin(1,i,j,k,1)+uin(1,i+1,j,k,1))
+           xR=x(i+1) ; uR=uin(1,i+1,j,k,2)/uin(1,i+1,j,k,1)
+           xL=x(i  ) ; uL=uin(1,i  ,j,k,2)/uin(1,i  ,j,k,1)
+           vR=half*(uin(1,i+1,j+1,k,3)/uin(1,i+1,j+1,k,1)+uin(1,i,j+1,k,3)/uin(1,i,j+1,k,1))
+           vL=half*(uin(1,i+1,j-1,k,3)/uin(1,i+1,j-1,k,1)+uin(1,i,j-1,k,3)/uin(1,i,j-1,k,1))
+           xc=half*(xR+xL)
+           dudx=(uR-uL)/dx
+           divv=(xR*uR-xL*uL)/dx+half*(vR-vL)/dy ; divv=divv/xc
+           txxR=nu*rho*(2.d0*dudx-two3rd*divv)
+
+           rho=half*(uin(1,i,j,k,1)+uin(1,i,j-1,k,1))
+           vR=half*(uin(1,i+1,j,k,3)/uin(1,i+1,j,k,1)+uin(1,i+1,j-1,k,3)/uin(1,i+1,j-1,k,1))
+           vL=half*(uin(1,i-1,j,k,3)/uin(1,i-1,j,k,1)+uin(1,i-1,j-1,k,3)/uin(1,i-1,j-1,k,1))
+           dvdx=half*(vR-vL)/dx
+           uR=uin(1,i,j,k,2)/uin(1,i,j,k,1) ; uL=uin(1,i,j-1,k,2)/uin(1,i,j-1,k,1)
+           dudy=(uR-uL)/dy ; xL=x(i)
+           vL=half*(uin(1,i,j,k,3)/uin(1,i,j,k,1)+uin(1,i,j-1,k,3)/uin(1,i,j-1,k,1))
+           txyL=nu*rho*(dvdx-vL/xL+dudy/xL)
+
+           rho=half*(uin(1,i,j,k,1)+uin(1,i,j+1,k,1))
+           vR=half*(uin(1,i+1,j,k,3)/uin(1,i+1,j,k,1)+uin(1,i+1,j+1,k,3)/uin(1,i+1,j+1,k,1))
+           vL=half*(uin(1,i-1,j,k,3)/uin(1,i-1,j,k,1)+uin(1,i-1,j+1,k,3)/uin(1,i-1,j+1,k,1))
+           dvdx=half*(vR-vL)/dx
+           uR=uin(1,i,j+1,k,2)/uin(1,i,j+1,k,1) ; uL=uin(1,i,j,k,2)/uin(1,i,j,k,1)
+           dudy=(uR-uL)/dy ; xR=x(i)
+           vR=half*(uin(1,i,j,k,3)/uin(1,i,j,k,1)+uin(1,i,j+1,k,3)/uin(1,i,j+1,k,1))
+           txyR=nu*rho*(dvdx-vR/xR+dudy/xR)
+
+           rho=uin(1,i,j,k,1)
+           vR=uin(1,i,j+1,k,3)/uin(1,i,j+1,k,1) ; vL=uin(1,i,j-1,k,3)/uin(1,i,j-1,k,1)
+           dvdy=half*(vR-vL)/dy ;
+           uc=uin(1,i,j,k,2)/uin(1,i,j,k,1) ; xc=x(i)
+           xR=x(i+1) ; uR=uin(1,i+1,j,k,2)/uin(1,i+1,j,k,1)
+           xL=x(i-1) ; uL=uin(1,i-1,j,k,2)/uin(1,i-1,j,k,1)
+           xc=x(i)
+           divv=half*(xR*uR-xL*uL)/dx+dvdy ; divv=divv/xc
+           tyy=nu*rho*(2.*dvdy/xc+2.*uc/xc-two3rd*divv)
+
+           xR=half*(x(i)+x(i+1)) ; xL=half*(x(i)+x(i-1)) ; xc=x(i)
+           fx=(xR*txxR-xL*txxL)/dx+(txyR-txyL)/dy-tyy
+           fx=fx/xc
+
+           !Compute fy, viscous force in 2nd direction
+           rho=half*(uin(1,i,j,k,1)+uin(1,i-1,j,k,1))
+           vR=uin(1,i,j,k,3)/uin(1,i,j,k,1) ; vL=uin(1,i-1,j,k,3)/uin(1,i-1,j,k,1)
+           dvdx=(vR-vL)/dx
+           uR=half*(uin(1,i,j+1,k,2)/uin(1,i,j+1,k,1)+uin(1,i-1,j+1,k,2)/uin(1,i-1,j+1,k,1))
+           uL=half*(uin(1,i,j-1,k,2)/uin(1,i,j-1,k,1)+uin(1,i-1,j-1,k,2)/uin(1,i-1,j-1,k,1))
+           dudy=half*(uR-uL)/dy ; xL=half*(x(i)+x(i-1))
+           vL=half*(uin(1,i,j,k,3)/uin(1,i,j,k,1)+uin(1,i-1,j,k,3)/uin(1,i-1,j,k,1))
+           txyL=nu*rho*(dvdx-vL/xL+dudy/xL)
+           
+           rho=half*(uin(1,i,j,k,1)+uin(1,i+1,j,k,1))
+           vR=uin(1,i+1,j,k,3)/uin(1,i+1,j,k,1) ; vL=uin(1,i,j,k,3)/uin(1,i,j,k,1)
+           dvdx=(vR-vL)/dx
+           uR=half*(uin(1,i,j+1,k,2)/uin(1,i,j+1,k,1)+uin(1,i+1,j+1,k,2)/uin(1,i+1,j+1,k,1))
+           uL=half*(uin(1,i,j-1,k,2)/uin(1,i,j-1,k,1)+uin(1,i+1,j-1,k,2)/uin(1,i+1,j-1,k,1))
+           dudy=half*(uR-uL)/dy ; xR=half*(x(i)+x(i+1))
+           vR=half*(uin(1,i,j,k,3)/uin(1,i,j,k,1)+uin(1,i+1,j,k,3)/uin(1,i+1,j,k,1))
+           txyR=nu*rho*(dvdx-vR/xR+dudy/xR)
+
+           rho=half*(uin(1,i,j,k,1)+uin(1,i,j-1,k,1))
+           vR=uin(1,i,j,k,3)/uin(1,i,j,k,1) ; vL=uin(1,i,j-1,k,3)/uin(1,i,j-1,k,1)
+           dvdy=(vR-vL)/dy
+           xR=x(i+1) ; xL=x(i-1) ; xc=x(i)
+           uR=half*(uin(1,i+1,j,k,2)/uin(1,i+1,j,k,1)+uin(1,i+1,j-1,k,2)/uin(1,i+1,j-1,k,1))
+           uL=half*(uin(1,i-1,j,k,2)/uin(1,i-1,j,k,1)+uin(1,i-1,j-1,k,2)/uin(1,i-1,j-1,k,1))
+           divv=half*(xR*uR-xL*uL)/dx+(vR-vL)/dy ; divv=divv/xc
+           uc=half*(uin(1,i,j,k,2)/uin(1,i,j,k,1)+uin(1,i,j-1,k,2)/uin(1,i,j-1,k,1))
+           tyyL=nu*rho*(2.*dvdy/xc+2.*uc/xc-two3rd*divv)
+
+           rho=half*(uin(1,i,j,k,1)+uin(1,i,j+1,k,1))
+           vR=uin(1,i,j+1,k,3)/uin(1,i,j+1,k,1) ; vL=uin(1,i,j,k,3)/uin(1,i,j,k,1)
+           dvdy=(vR-vL)/dy
+           uR=half*(uin(1,i+1,j,k,2)/uin(1,i+1,j,k,1)+uin(1,i+1,j+1,k,2)/uin(1,i+1,j+1,k,1))
+           uL=half*(uin(1,i-1,j,k,2)/uin(1,i-1,j,k,1)+uin(1,i-1,j+1,k,2)/uin(1,i-1,j+1,k,1))
+           divv=half*(xR*uR-xL*uL)/dx+(vR-vL)/dy ; divv=divv/xc
+           uc=half*(uin(1,i,j,k,2)/uin(1,i,j,k,1)+uin(1,i,j+1,k,2)/uin(1,i,j+1,k,1))
+           tyyR=nu*rho*(2.*dvdy/xc+2.*uc/xc-two3rd*divv)
+
+           xR=half*(x(i)+x(i+1)) ; xL=half*(x(i)+x(i-1)) 
+           fy=(xR*xR*txyR-xL*xL*txyL)/dx/xc
+           fy=fy+(tyyR-tyyL)/dy
+           fy=fy/xc
+
+           !Store forces in intermediate arrays
+           force(i,j,k,1)=fx
+           force(i,j,k,2)=fy
+
+        end do
+     end do
+  end do
+
+  !update momentum
+  do k=1,khi
+     do j=1,jhi
+        do i=1,ihi
+           uin(1,i,j,k,2)=uin(1,i,j,k,2)+force(i,j,k,1)*dt
+           uin(1,i,j,k,3)=uin(1,i,j,k,3)+force(i,j,k,2)*dt
+        end do
+     end do
+  end do
+!
+  deallocate(force)
+!
+  return
+end subroutine viscosity_II

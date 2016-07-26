@@ -1,0 +1,58 @@
+
+&start_params
+     restart=0 
+    ,tlim=2000.
+    ,verbose=.false. /
+
+&scheme_params
+     nx_glob=8
+    ,ny_glob=16
+    ,nz_glob=80
+    ,riemann  ='hlld'
+    ,riemann2d='hlld'
+    ,slope_type=3
+    ,bval_in =3,1,4
+    ,bval_out=3,1,4
+    ,courant=0.7 /
+
+&model_params
+     xmin=-0.5
+    ,xmax= 0.5
+    ,ymin= 0.
+    ,ymax=  4.
+    ,zmin=-5.
+    ,zmax=5.
+    ,Omega0=1.d0
+    ,ciso=1.d0 /
+
+&output_params
+     dthist= 1.d-1
+    ,dtdump= 6.283
+    ,dtspec= 0.6283d0 /
+
+&mpicon
+     nxslice=1
+    ,nyslice=1
+    ,nzslice=8 /
+
+&init_params
+     beta=100.
+    ,P_mid=1.d0
+    ,type='r'
+	,gamma=1.666666d0
+    ,amp=1.d-2 /
+
+!==============================================================
+!bval_type : boundary conditions types
+!	1 : periodic
+!	2 : zero gradient
+!	3 : shearing sheet
+!riemann : Riemann solver used
+!	'lf'     : lax-fridrich
+!	'roe'    : athena Roe solver
+!	'hll'    : HLL solver
+!	'bouchut': Bouchut HLLC solver (3 waves)
+!restart :
+!	0 : initial problem
+!	1 : restart from restart file
+!=============================================================
