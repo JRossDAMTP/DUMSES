@@ -1,0 +1,71 @@
+K 25
+svn:wc:ra_dav:version-url
+V 58
+/svn/coast/!svn/ver/1910/dumses_mpi/trunk/patch/stratified
+END
+input
+K 25
+svn:wc:ra_dav:version-url
+V 64
+/svn/coast/!svn/ver/1236/dumses_mpi/trunk/patch/stratified/input
+END
+boundana.f90
+K 25
+svn:wc:ra_dav:version-url
+V 71
+/svn/coast/!svn/ver/1582/dumses_mpi/trunk/patch/stratified/boundana.f90
+END
+condinit.f90
+K 25
+svn:wc:ra_dav:version-url
+V 71
+/svn/coast/!svn/ver/1904/dumses_mpi/trunk/patch/stratified/condinit.f90
+END
+source_term.f90
+K 25
+svn:wc:ra_dav:version-url
+V 74
+/svn/coast/!svn/ver/1904/dumses_mpi/trunk/patch/stratified/source_term.f90
+END
+restart_run.f90
+K 25
+svn:wc:ra_dav:version-url
+V 74
+/svn/coast/!svn/ver/1910/dumses_mpi/trunk/patch/stratified/restart_run.f90
+END
+umuscl.f90
+K 25
+svn:wc:ra_dav:version-url
+V 69
+/svn/coast/!svn/ver/1774/dumses_mpi/trunk/patch/stratified/umuscl.f90
+END
+viscosity.f90
+K 25
+svn:wc:ra_dav:version-url
+V 72
+/svn/coast/!svn/ver/1774/dumses_mpi/trunk/patch/stratified/viscosity.f90
+END
+special.f90
+K 25
+svn:wc:ra_dav:version-url
+V 70
+/svn/coast/!svn/ver/1774/dumses_mpi/trunk/patch/stratified/special.f90
+END
+specialMovie.f90
+K 25
+svn:wc:ra_dav:version-url
+V 75
+/svn/coast/!svn/ver/1774/dumses_mpi/trunk/patch/stratified/specialMovie.f90
+END
+history.f90
+K 25
+svn:wc:ra_dav:version-url
+V 70
+/svn/coast/!svn/ver/1574/dumses_mpi/trunk/patch/stratified/history.f90
+END
+user_init.f90
+K 25
+svn:wc:ra_dav:version-url
+V 72
+/svn/coast/!svn/ver/1839/dumses_mpi/trunk/patch/stratified/user_init.f90
+END

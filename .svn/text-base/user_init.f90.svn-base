@@ -1,0 +1,56 @@
+subroutine user_init
+  use hydro_parameters
+  use const
+  use variables , only : gravin,z,dx,dy,dz,ngrid
+  use stratified
+  implicit none
+
+  integer :: i,j,k,l,ipos,idim
+  integer :: ilo,ihi,jlo,jhi,klo,khi
+  real(dp) :: xc,yc,phic,dist
+  real(dp), dimension(2,ndim) :: phi
+
+  !Compute gravin array
+  ilo = min(1,iu1+1) ; ihi = max(1,iu2-1)
+  jlo = min(1,ju1+1) ; jhi = max(1,ju2-1)
+  klo = min(1,ku1+1) ; khi = max(1,ku2-1)
+
+  gravin=0.d0 ; phi=0.d0
+  do k=klo,khi
+     do j=jlo,jhi
+        do i=ilo,ihi
+
+           phi(1,3)=half*Omega0**2*z(k-1)**2
+           phi(2,3)=half*Omega0**2*z(k+1)**2
+           if (smooth) then
+              if (z(k-1)>zfloor) phi(1,3)=half*Omega0**2*zfloor**2
+              if (z(k+1)>zfloor) phi(2,3)=half*Omega0**2*zfloor**2
+           endif
+
+           do l=1,ngrid
+              !First coordinate gravity force
+              gravin(l,i,j,k,1)=-half*(phi(2,1)-phi(1,1))/dx
+              !Second coordinate gravity force
+              if (ndim>1) gravin(l,i,j,k,2)=-half*(phi(2,2)-phi(1,2))/dy
+              !Third coordinate gravity force
+              if (ndim>2) gravin(l,i,j,k,3)=-half*(phi(2,3)-phi(1,3))/dz
+           end do
+
+        end do
+     end do
+  end do
+
+  return
+end subroutine user_init
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine get_eta(etaval,r)
+  use amr_parameters
+  use variables , only : eta
+  implicit none
+  real(dp) :: etaval,r
+  etaval=eta
+  return
+end subroutine get_eta

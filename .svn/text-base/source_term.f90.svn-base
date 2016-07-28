@@ -1,0 +1,183 @@
+! uin = (\rho, \rho vx, \rho vy, \rho vz, Etot, bx, by, bz)
+subroutine source_term
+  use hydro_parameters
+  use const
+  use variables , only : dt,uin,old_uin,gravin,ngrid,z,dx,dy,dz
+  use stratified
+  implicit none
+
+  integer :: i,j,k,l
+
+  real(dp) :: rhon,rhonp1 ! Gravity force parameters
+  real(dp) :: theta,smallH,pi,mass !Addmass parameters
+
+  if (verbose) write (*,*) 'Entering source_term subroutine...'
+
+  !Gravity term
+  do k=1,nz
+     do j=1,ny
+        do i=1,nx
+           do l=1,ngrid
+
+              !density
+              rhon  =old_uin(l,i,j,k,1)
+              rhonp1=    uin(l,i,j,k,1)
+
+              !update momentum
+                          uin(l,i,j,k,2)=uin(l,i,j,k,2)+half*(rhon+rhonp1)*gravin(l,i,j,k,1)*dt
+              if (ndim>1) uin(l,i,j,k,3)=uin(l,i,j,k,3)+half*(rhon+rhonp1)*gravin(l,i,j,k,2)*dt
+              if (ndim>2) uin(l,i,j,k,4)=uin(l,i,j,k,4)+half*(rhon+rhonp1)*gravin(l,i,j,k,3)*dt
+
+           end do
+        end do
+     end do
+  end do
+
+  !Set density field to floor
+  if (floor) then
+     do k=1,nz
+        do j=1,ny
+           do i=1,nx
+              do l=1,ngrid
+                 
+                 !density
+                 uin(l,i,j,k,1)=max(uin(l,i,j,k,1),exp(-zfloor**2/2.))
+                 
+              end do
+           end do
+        end do
+     end do
+  endif  
+
+  !Add source term in continuity equation
+  if (addmass) then
+
+     smallH=0.2 ; pi=2.d0*asin(1.d0)
+
+     mass=0.d0
+     do k=1,nz
+        do j=1,ny
+           do i=1,nx
+              mass = mass + uin(1,i,j,k,1)
+           end do
+        end do
+     end do
+#if WITHMPI==1
+     call sumBcast(mass,1)
+#endif
+     mass=mass*dx*dy*dz
+     theta=(mass0-mass)/sqrt(2.*pi)/smallH/(xmax-xmin)/(ymax-ymin)
+     
+     !restore initial mass
+     do k=1,nz
+        do j=1,ny
+           do i=1,nx
+              uin(1,i,j,k,2:4)=uin(1,i,j,k,2:4)/uin(1,i,j,k,1)
+              uin(1,i,j,k,1)=uin(1,i,j,k,1)+theta*exp(-z(k)**2/2.d0/smallH**2)
+              uin(1,i,j,k,2:4)=uin(1,i,j,k,2:4)*uin(1,i,j,k,1)
+           end do
+        end do
+     end do
+              
+  endif
+
+  if (verbose) write (*,*) 'End of source_term subroutine...'
+
+end subroutine source_term
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine checkLowBeta(q,dq,dbf,flagCell,ngrid)
+  use amr_parameters
+  use hydro_parameters
+  use const
+  implicit none
+
+  integer :: ngrid
+  real(dp), dimension(1:nvector,iu1:iu2  ,ju1:ju2  ,ku1:ku2  ,1:nvar       ) :: q 
+  real(dp), dimension(1:nvector,iu1:iu2  ,ju1:ju2  ,ku1:ku2  ,1:nvar,1:ndim) :: dq
+  real(dp), dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2      ,1:3   ,1:ndim) :: dbf
+  logical , dimension(1:nvector,iu1:iu2  ,ju1:ju2  ,ku1:ku2 ) :: flagCell
+
+  real(dp) :: rho,bx,by,bz,pmag,pth,beta
+  real(dp) :: minBeta
+  integer  :: i,j,k,l,ncell
+  integer  :: ilo,ihi,jlo,jhi,klo,khi
+
+  minBeta=1.d-3 ; ncell=0 ; flagCell=.False.
+
+  ilo=min(1,iu1+3); ihi=max(1,iu2-3)
+  jlo=min(1,ju1+3); jhi=max(1,ju2-3)
+  klo=min(1,ku1+3); khi=max(1,ku2-3)
+
+  do k=klo,khi
+     do j=jlo,jhi
+        do i=ilo,ihi
+           do l=1,ngrid
+           
+              rho= q(l,i,j,k,1)
+              bx = q(l,i,j,k,6)
+              by = q(l,i,j,k,7)
+              bz = q(l,i,j,k,8)
+           
+              pth  = rho*ciso**2
+              pmag = half*(bx*bx+by*by+bz*bz)
+
+              beta=pth/pmag
+
+              if (beta<minBeta) then
+                 !dq(l,i,j,k,:,:)=zero
+                 !dbf(l,i:i+1,j:j+1,k:k+1,:,:)=zero
+                 !flagCell(l,i:i+1,j:j+1,k:k+1)=.True.
+                 !ncell=ncell+1
+              endif
+
+           end do
+        end do
+     end do
+  end do
+
+  if (ncell>0) write (*,*) '   Nb of cells affected by low beta:',ncell
+
+  return
+end subroutine checkLowBeta
+!###########################################################
+!###########################################################
+!###########################################################
+!###########################################################
+subroutine gravity_predictor(v,gravin,dt,igrav,jgrav,kgrav,ngrid)
+  use hydro_parameters
+  use const
+  implicit none
+
+  integer :: ngrid
+  logical :: igrav,jgrav,kgrav
+  real(dp), dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:3   ) :: v
+  real(dp), dimension(1:nvector,iu1:iu2,ju1:ju2,ku1:ku2,1:ndim) :: gravin
+  real(dp) :: dt
+
+  integer :: i,j,k,l
+  integer :: ilo,ihi,jlo,jhi,klo,khi
+
+  ilo = min(1,iu1+1) ; ihi = max(1,iu2-1)
+  jlo = min(1,ju1+1) ; jhi = max(1,ju2-1)
+  klo = min(1,ku1+1) ; khi = max(1,ku2-1)
+
+  !v=v+gravin*dt*half
+  do k=klo,khi
+     do j=jlo,jhi
+        do i=ilo,ihi
+           do l=1,ngrid
+
+              if (igrav)                v(l,i,j,k,1) = v(l,i,j,k,1) + half*dt*gravin(l,i,j,k,1)
+              if ((jgrav).and.(ndim>1)) v(l,i,j,k,2) = v(l,i,j,k,2) + half*dt*gravin(l,i,j,k,2)
+              if ((kgrav).and.(ndim>2)) v(l,i,j,k,3) = v(l,i,j,k,3) + half*dt*gravin(l,i,j,k,3)
+
+           end do
+        end do
+     end do
+  end do
+
+  return
+end subroutine gravity_predictor
